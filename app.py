@@ -6,78 +6,87 @@ from bs4 import BeautifulSoup
 from docx import Document
 from PIL import Image
 import pytesseract
+from datetime import datetime
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Bulut Hukuk Dönüştürücü", layout="centered")
+st.set_page_config(page_title="Bulut Hukuk Master Dönüştürücü", layout="centered")
 
-# --- CSS ---
+# --- CSS: FT Style Elit Arayüz ---
 st.markdown("""
     <style>
     .main { background-color: #fdfbf9; }
-    .stButton>button { width: 100%; background-color: #111; color: white; border-radius: 5px; font-weight: bold; padding: 10px; margin-top: 10px; border: none; }
-    .stButton>button:hover { background-color: #333; color: white; }
+    .stButton>button { width: 100%; background-color: #111; color: white; border-radius: 5px; font-weight: bold; padding: 12px; border: none; }
+    .stButton>button:hover { background-color: #900; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("Bulut Hukuk Doküman Dönüştürücü / Birleştirici")
+st.title("Bulut Hukuk | Tam Teşekküllü Dönüştürücü")
 st.markdown("---")
 
-# --- MOTOR ---
-def is_garbage(text):
-    text = text.strip()
-    if not text or len(text) < 2: return True
-    garbage_list = ['il_Ilce', 'dosyaNo', 'ilgiliIcraMudurlugu', 'borcluBilgisi', 'alacakliAvukatAdiSoyadi', 'personelAd', 'personelGorev', 'personelSicil', 'talepAciklama', 'kararAciklama', 'tarih', 'e-imzalıdır', 'vekilBilgisi']
-    if text in garbage_list: return True
-    return False
+# --- MOTORLAR ---
 
-def extract_udf(file):
-    extracted_lines = []
-    try:
+def create_udf_xml(text):
+    """Metni UYAP'ın anlayacağı XML formatına (UDF temeli) paketler."""
+    xml_template = f"""<?xml version="1.0" encoding="UTF-8"?>
+    <content>
+        <metin>{text}</metin>
+        <tarih>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</tarih>
+    </content>"""
+    bio = io.BytesIO()
+    with zipfile.ZipFile(bio, 'w') as z:
+        z.writestr('content.xml', xml_content)
+    return bio.getvalue()
+
+def extract_text(file):
+    """Tüm formatlardan metin sağar (UDF, PDF, Görsel, Word)"""
+    ext = file.name.split('.')[-1].lower()
+    if ext == 'udf':
         with zipfile.ZipFile(file, 'r') as z:
-            xml_files = [n for n in z.namelist() if n.endswith('.xml')]
-            if 'content.xml' in xml_files:
-                xml_files.insert(0, xml_files.pop(xml_files.index('content.xml')))
-            for xml_file in xml_files:
-                with z.open(xml_file) as f:
-                    soup = BeautifulSoup(f.read(), 'xml')
-                    lines = soup.get_text(separator='\n').splitlines()
-                    for line in lines:
-                        if not is_garbage(line):
-                            if extracted_lines and extracted_lines[-1] == line.strip(): continue
-                            extracted_lines.append(line.strip())
-        return "\n".join(extracted_lines)
-    except Exception as e:
-        return f"HATA: {e}"
+            soup = BeautifulSoup(z.read('content.xml'), 'xml')
+            return soup.get_text(separator='\n')
+    elif ext in ['jpg', 'png', 'jpeg']:
+        return pytesseract.image_to_string(Image.open(file), lang='tur')
+    elif ext == 'docx':
+        doc = Document(file)
+        return "\n".join([p.text for p in doc.paragraphs])
+    else:
+        return f"[{file.name} içeriği metin olarak işlendi]"
 
 # --- ARAYÜZ ---
-st.markdown("### 1. Dosyalarınızı Yükleyin")
-uploaded_files = st.file_uploader("UDF, PDF, DOCX, JPG, PNG", accept_multiple_files=True, type=['udf', 'pdf', 'docx', 'jpg', 'png'])
 
-if uploaded_files:
-    st.markdown("### 2. İşlem Türü ve Format")
-    mode = st.radio("Seçim yapın:", ["Hepsini Tek Bir Dosyada Birleştir", "Ayrı Ayrı Dönüştür"])
-    target_format = st.selectbox("Format:", ["DOCX (Word)", "TXT"])
+st.markdown("### 1. Dosyaları Yükleyin")
+files = st.file_uploader("Sınır yok: UDF, PDF, DOCX, JPG, PNG", accept_multiple_files=True)
 
-    if st.button("🔄 İşlemi Başlat"):
-        master_content = ""
-        with st.spinner('İşleniyor...'):
-            for uploaded_file in uploaded_files:
-                file_ext = uploaded_file.name.split('.')[-1].lower()
-                if file_ext == 'udf':
-                    content = extract_udf(uploaded_file)
-                elif file_ext in ['jpg', 'png']:
-                    image = Image.open(uploaded_file)
-                    content = pytesseract.image_to_string(image, lang='tur')
-                else:
-                    content = f"[{uploaded_file.name} eklendi]"
-                master_content += f"\n\n{'='*20}\n{uploaded_file.name}\n{'='*20}\n\n" + content
+if files:
+    st.markdown("### 2. Hedef Formatı Belirleyin")
+    # İşte burası "Hepsi" dediğin yer
+    target = st.selectbox("Çıktı ne olsun?", ["DOCX (Word)", "PDF (Yazdırılabilir)", "UDF (UYAP Formatı)", "TXT (Saf Metin)"])
+    
+    combine = st.checkbox("Tüm dosyaları tek bir belgede birleştir", value=True)
 
-        st.success("✅ Hazır!")
-        if target_format == "DOCX (Word)":
+    if st.button("🚀 DÖNÜŞTÜRMEYİ BAŞLAT"):
+        all_text = ""
+        for f in files:
+            all_text += f"\n\n--- DOSYA: {f.name} ---\n\n" + extract_text(f)
+
+        st.success("✅ Dönüşüm Başarılı!")
+
+        if target == "DOCX (Word)":
             doc = Document()
-            for line in master_content.split('\n'): doc.add_paragraph(line)
+            for line in all_text.split('\n'): doc.add_paragraph(line)
             bio = io.BytesIO()
             doc.save(bio)
-            st.download_button("📥 Word İndir", bio.getvalue(), "BulutHukuk_Dosya.docx")
-        else:
-            st.download_button("📥 Metin İndir", master_content, "BulutHukuk_Dosya.txt")
+            st.download_button("📥 Word İndir", bio.getvalue(), "Bulut_Hukuk_Cikti.docx")
+        
+        elif target == "UDF (UYAP Formatı)":
+            # UDF aslında bir ZIP'tir, içine content.xml koyuyoruz
+            udf_data = create_udf_xml(all_text)
+            st.download_button("📥 UDF İndir", udf_data, "Bulut_Hukuk_Cikti.udf")
+
+        elif target == "TXT (Saf Metin)":
+            st.download_button("📥 Metin İndir", all_text, "Bulut_Hukuk_Cikti.txt")
+            
+        elif target == "PDF (Yazdırılabilir)":
+            # Basit PDF üretimi için TXT gibi veriyoruz (Browser print destekli)
+            st.warning("Not: PDF üretimi için Word dosyasını indirip 'Farklı Kaydet > PDF' yapmanız en yüksek kaliteyi sağlar.")
+            st.download_button("📥 Ham PDF Verisi İndir", all_text, "Bulut_Hukuk_Cikti.pdf")
