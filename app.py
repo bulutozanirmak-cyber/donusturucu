@@ -1,44 +1,50 @@
 import streamlit as st
 import zipfile
 import io
-import os
 from bs4 import BeautifulSoup
 from docx import Document
 from PIL import Image
 import pytesseract
-from datetime import datetime
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # Sayfa Ayarları
-st.set_page_config(page_title="Bulut Hukuk Master Dönüştürücü", layout="centered")
+st.set_page_config(page_title="Bulut Hukuk Master", layout="centered")
 
-# --- CSS: FT Style Elit Arayüz ---
 st.markdown("""
     <style>
     .main { background-color: #fdfbf9; }
-    .stButton>button { width: 100%; background-color: #111; color: white; border-radius: 5px; font-weight: bold; padding: 12px; border: none; }
-    .stButton>button:hover { background-color: #900; color: white; }
+    .stButton>button { width: 100%; background-color: #111; color: white; padding: 12px; border: none; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("Bulut Hukuk | Tam Teşekküllü Dönüştürücü")
-st.markdown("---")
+st.title("Bulut Hukuk | Nihai Dönüştürücü")
 
-# --- MOTORLAR ---
+# --- PDF ÜRETİCİ MOTOR ---
+def create_pdf(text):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    lines = text.split('\n')
+    
+    y = height - 50  # Üst boşluk
+    c.setFont("Helvetica", 10) # Standart font (Türkçe karakter desteği için gerekirse TTF yüklenebilir)
+    
+    for line in lines:
+        if y < 50: # Sayfa biterse yeni sayfaya geç
+            c.showPage()
+            y = height - 50
+            c.setFont("Helvetica", 10)
+        c.drawString(50, y, line)
+        y -= 15 # Satır aralığı
+        
+    c.save()
+    return buffer.getvalue()
 
-def create_udf_xml(text):
-    """Metni UYAP'ın anlayacağı XML formatına (UDF temeli) paketler."""
-    xml_template = f"""<?xml version="1.0" encoding="UTF-8"?>
-    <content>
-        <metin>{text}</metin>
-        <tarih>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</tarih>
-    </content>"""
-    bio = io.BytesIO()
-    with zipfile.ZipFile(bio, 'w') as z:
-        z.writestr('content.xml', xml_content)
-    return bio.getvalue()
-
+# --- DİĞER MOTORLAR ---
 def extract_text(file):
-    """Tüm formatlardan metin sağar (UDF, PDF, Görsel, Word)"""
     ext = file.name.split('.')[-1].lower()
     if ext == 'udf':
         with zipfile.ZipFile(file, 'r') as z:
@@ -49,44 +55,38 @@ def extract_text(file):
     elif ext == 'docx':
         doc = Document(file)
         return "\n".join([p.text for p in doc.paragraphs])
-    else:
-        return f"[{file.name} içeriği metin olarak işlendi]"
+    return f"[{file.name} işlendi]"
 
 # --- ARAYÜZ ---
+uploaded_files = st.file_uploader("Dosyaları yükleyin (UDF, PDF, DOCX, JPG, PNG)", accept_multiple_files=True)
 
-st.markdown("### 1. Dosyaları Yükleyin")
-files = st.file_uploader("Sınır yok: UDF, PDF, DOCX, JPG, PNG", accept_multiple_files=True)
-
-if files:
-    st.markdown("### 2. Hedef Formatı Belirleyin")
-    # İşte burası "Hepsi" dediğin yer
-    target = st.selectbox("Çıktı ne olsun?", ["DOCX (Word)", "PDF (Yazdırılabilir)", "UDF (UYAP Formatı)", "TXT (Saf Metin)"])
+if uploaded_files:
+    target = st.selectbox("Hedef Format:", ["PDF (Doğrudan)", "DOCX (Word)", "UDF (UYAP)", "TXT"])
     
-    combine = st.checkbox("Tüm dosyaları tek bir belgede birleştir", value=True)
+    if st.button("🚀 İŞLEMİ BAŞLAT"):
+        full_text = ""
+        for f in uploaded_files:
+            full_text += f"\n\n--- DOSYA: {f.name} ---\n" + extract_text(f)
+            
+        st.success("✅ Dönüşüm tamamlandı.")
 
-    if st.button("🚀 DÖNÜŞTÜRMEYİ BAŞLAT"):
-        all_text = ""
-        for f in files:
-            all_text += f"\n\n--- DOSYA: {f.name} ---\n\n" + extract_text(f)
-
-        st.success("✅ Dönüşüm Başarılı!")
-
-        if target == "DOCX (Word)":
+        if target == "PDF (Doğrudan)":
+            pdf_data = create_pdf(full_text)
+            st.download_button("📥 PDF İndir", pdf_data, "BulutHukuk_Cikti.pdf")
+        
+        elif target == "DOCX (Word)":
             doc = Document()
-            for line in all_text.split('\n'): doc.add_paragraph(line)
+            for line in full_text.split('\n'): doc.add_paragraph(line)
             bio = io.BytesIO()
             doc.save(bio)
-            st.download_button("📥 Word İndir", bio.getvalue(), "Bulut_Hukuk_Cikti.docx")
-        
-        elif target == "UDF (UYAP Formatı)":
-            # UDF aslında bir ZIP'tir, içine content.xml koyuyoruz
-            udf_data = create_udf_xml(all_text)
-            st.download_button("📥 UDF İndir", udf_data, "Bulut_Hukuk_Cikti.udf")
-
-        elif target == "TXT (Saf Metin)":
-            st.download_button("📥 Metin İndir", all_text, "Bulut_Hukuk_Cikti.txt")
+            st.download_button("📥 Word İndir", bio.getvalue(), "BulutHukuk_Cikti.docx")
             
-        elif target == "PDF (Yazdırılabilir)":
-            # Basit PDF üretimi için TXT gibi veriyoruz (Browser print destekli)
-            st.warning("Not: PDF üretimi için Word dosyasını indirip 'Farklı Kaydet > PDF' yapmanız en yüksek kaliteyi sağlar.")
-            st.download_button("📥 Ham PDF Verisi İndir", all_text, "Bulut_Hukuk_Cikti.pdf")
+        elif target == "UDF (UYAP)":
+            # Basit UDF XML yapısı
+            bio = io.BytesIO()
+            with zipfile.ZipFile(bio, 'w') as z:
+                z.writestr('content.xml', f'<?xml version="1.0" encoding="UTF-8"?><content><metin>{full_text}</metin></content>')
+            st.download_button("📥 UDF İndir", bio.getvalue(), "BulutHukuk_Cikti.udf")
+            
+        else:
+            st.download_button("📥 TXT İndir", full_text, "BulutHukuk_Cikti.txt")
