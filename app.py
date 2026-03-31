@@ -87,10 +87,30 @@ def extract_text(file):
     if ext == 'udf':
         try:
             with zipfile.ZipFile(file, 'r') as z:
-                soup = BeautifulSoup(z.read('content.xml'), 'xml')
-                return soup.get_text(separator='\n')
-        except: return "[UDF Okunamadı]"
-        
+                xml_content = z.read('content.xml')
+                
+                # Kodlama uyuşmazlığını giderme
+                try:
+                    decoded_text = xml_content.decode('utf-8')
+                except UnicodeDecodeError:
+                    decoded_text = xml_content.decode('windows-1254', errors='ignore')
+
+                # 1. Aşama: UYAP UDF'nin asıl metninin bulunduğu CDATA bloğunu doğrudan yakalama
+                if "<![CDATA[" in decoded_text:
+                    cdata_text = decoded_text.split("<![CDATA[")[1].split("]]>")[0]
+                    if cdata_text.strip():
+                        return cdata_text.strip()
+                
+                # 2. Aşama: CDATA yoksa veya başarısız olursa eski metoda (BeautifulSoup) dönüş
+                soup = BeautifulSoup(xml_content, 'xml')
+                extracted_text = soup.get_text(separator='\n').strip()
+                if extracted_text:
+                    return extracted_text
+                else:
+                    return "[UDF İçeriği Boş]"
+        except Exception as e: 
+            return f"[UDF Okunamadı: {str(e)}]"
+            
     elif ext in ['jpg', 'png', 'jpeg']:
         return pytesseract.image_to_string(Image.open(file), lang='tur')
         
