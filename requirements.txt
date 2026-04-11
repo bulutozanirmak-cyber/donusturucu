@@ -1,8 +1,7 @@
 streamlit
-pytesseract
-pdf2image
-python-docx
 beautifulsoup4
 lxml
+python-docx
 Pillow
+pytesseract
 reportlab
