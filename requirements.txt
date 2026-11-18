@@ -1,7 +1,5 @@
-streamlit
-beautifulsoup4
-lxml
 python-docx
+fpdf2
+pymupdf
 Pillow
 pytesseract
-reportlab
